@@ -121,7 +121,8 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
             return document.querySelectorAll(tableRow_Selector).length;
         }, tableRow_Selector);
 
-        // when there is no data available in the site for that particular date, the site still shows table but with a single row that says 'No data available in the table'
+        // when there is no data available in the site for that particular date, the site still shows table
+        // but with a single row that says 'No data available in the table'
         if (rowCount <= 1) {
             console.warn('⚠️  Table has no data!\n');
             continue;
@@ -145,14 +146,16 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
                     average: formatPrice(cells[4]?.innerText.trim()),
                 }
 
+                const newVegetableData = {
+                    ...currentDateVegetable,
+                    fluctuationValue: 0,
+                    fluctuationPercentage: 0,
+                    hasSignificantFluctuation: false
+                }
+
                 // don't compare for the first day data since there are no previous date data available
                 if (dateStr === '2025-01-01') {
-                    return {
-                        ...currentDateVegetable,
-                        fluctuationValue: 0,
-                        fluctuationPercentage: 0,
-                        hasSignificantFluctuation: false
-                    }
+                    return newVegetableData; // every vegetable is new for the first date
                 }
                 else {
                     const previousVegetableData = previousDateVegetables.find(previousVegetableData => (
@@ -171,6 +174,10 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
                             fluctuationPercentage,
                             hasSignificantFluctuation
                         }
+                    } else {
+                        return newVegetableData
+                        // if the current commodity is not found in previousDateVegetables, it still needs to be added as a new vegetable
+                        // so that it can be compared when it is encountered in next iterations  
                     }
 
                 }
