@@ -35,14 +35,18 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
     let startDate = new Date('2025-01-01');
 
     // this will be used to store the previousDate data and referenced later to compare prices with current date data
-    let previousDateVegetables = [];
+    let lastKnownVegetablesMap = new Map();
 
     // modify startDate and previousDateVegetables accordingly if database is not empty
     if (latestDoc.length > 0) {
         const lastDate = new Date(latestDoc[0].date);
         lastDate.setDate(lastDate.getDate() + 1); // lastDate.setDate returns number
         startDate = lastDate; //lastDate is modified object from above line
-        previousDateVegetables = [...latestDoc[0].vegetablesData];
+
+        const latestVegetables = latestDoc[0].vegetablesData;
+        for (const veg of latestVegetables) {
+            lastKnownVegetablesMap.set(veg.commodity, veg);
+        }
     }
 
     // initialize end date as of today
@@ -131,7 +135,7 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
         console.log('Scraping data from the data table...');
 
         // extract data of that particular date
-        const dataOfOneDay = await page.evaluate((tableRow_Selector, dateStr, previousDateVegetables) => {
+        const dataOfOneDay = await page.evaluate((tableRow_Selector, dateStr, lastKnownVegetables) => {
             const formatPrice = (price) => parseFloat(price.split(' ')[1]); // RS 30.29 to 30.29
             const rows = Array.from(document.querySelectorAll(tableRow_Selector));
 
@@ -158,14 +162,13 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
                     return newVegetableData; // every vegetable is new for the first date
                 }
                 else {
-                    const previousVegetableData = previousDateVegetables.find(previousVegetableData => (
-                        previousVegetableData.commodity === currentDateVegetable.commodity
-                    ))
+                    const previousVegetableData = lastKnownVegetables[currentDateVegetable.commodity];
+
                     if (previousVegetableData) {
                         const previousPrice = previousVegetableData.average;
                         const currentPrice = currentDateVegetable.average;
-                        const fluctuationValue = (currentPrice - previousPrice).toFixed(2);
-                        const fluctuationPercentage = ((fluctuationValue / previousPrice) * 100).toFixed(2);
+                        const fluctuationValue = Math.round((currentPrice - previousPrice) * 100) / 100; // alternative to toFixed(2) because it returns string
+                        const fluctuationPercentage = Math.round(((fluctuationValue / previousPrice) * 100) * 100) / 100;
                         const hasSignificantFluctuation = Math.abs(fluctuationPercentage) >= 15;
 
                         return {
@@ -177,12 +180,11 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
                     } else {
                         return newVegetableData
                         // if the current commodity is not found in previousDateVegetables, it still needs to be added as a new vegetable
-                        // so that it can be compared when it is encountered in next iterations  
+                        // so that it can be compared when it is encountered in next iterations
                     }
-
                 }
             });
-        }, tableRow_Selector, dateStr, previousDateVegetables);
+        }, tableRow_Selector, dateStr, Object.fromEntries(lastKnownVegetablesMap));
 
         console.log('Scraping completed!')
 
@@ -192,7 +194,9 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
             const dataOfOneDay_filtered = dataOfOneDay.filter(d => d !== null && d !== undefined);
 
             // make current vegetable data as previous vegetable data for next iteration's comparison
-            previousDateVegetables = [...dataOfOneDay_filtered];
+            for (const veg of dataOfOneDay_filtered) {
+                lastKnownVegetablesMap.set(veg.commodity, veg);
+            }
 
             const singleDate_Data = {
                 date: dateStr,
