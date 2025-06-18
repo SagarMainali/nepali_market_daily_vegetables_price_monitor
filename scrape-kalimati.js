@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const puppeteer = require('puppeteer');
+const { sendFluctuationEmail } = require('./sendEmail');
 
 // MongoDB Atlas connection
 const uri = process.env.MONGODB_URI;
@@ -22,11 +23,14 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
 
     await client.connect();
     const db = client.db();
-    const collection = db.collection('daily_prices');
-    await collection.createIndex({ date: 1 }, { unique: true });
+    const vegetablesCollection = db.collection('daily_prices');
+    await vegetablesCollection.createIndex({ date: 1 }, { unique: true });
+
+    const usersCollection = db.collection('user_data');
+    const users = await usersCollection.find().toArray();
 
     // get the data of latest saved date 
-    const latestDoc = await collection
+    const latestDoc = await vegetablesCollection
         .find({})
         .sort({ date: -1 })
         .limit(1)
@@ -210,7 +214,7 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
                 // }
 
                 // safer way to add data as it avoids duplication 
-                const postedDocument = await collection.updateOne(
+                const postedDocument = await vegetablesCollection.updateOne(
                     { date: dateStr },
                     { $set: singleDate_Data },
                     { upsert: true }
@@ -218,6 +222,37 @@ const tableRow_Selector = `${dataTable_Selector} tbody tr`;
 
                 if (postedDocument.acknowledged) {
                     console.log(`✅ Saved scraped data of selected date with id: ${postedDocument.upsertedId}\n`);
+
+                    // get all vegetables of this particular date that has significant fluctuation
+                    const vegetablesWithSignificantFluctuation = dataOfOneDay_filtered.filter(v => v.hasSignificantFluctuation);
+
+                    if (vegetablesWithSignificantFluctuation.length > 0) {
+                        // iterate through each user from the database
+                        for (const user of users) {
+                            const userSelectedVegetablesMatch = [];
+
+                            // iterate through each fluctuated vegetable
+                            for (const fluctuatedVegetable of vegetablesWithSignificantFluctuation) {
+                                // check if the list of userSelectedVegetables at the time of registration includes the fluctuatedVegetable
+                                const isUserSelectedVegetableFluctuated = user.selectedVegetablesForNotification.includes(fluctuatedVegetable.commodity);
+
+                                if (isUserSelectedVegetableFluctuated) {
+                                    userSelectedVegetablesMatch.push(fluctuatedVegetable);
+                                }
+                            }
+
+                            // send email if only there has been fluctuation on vegetables that user has selected
+                            if (userSelectedVegetablesMatch.length > 0) {
+                                try {
+                                    await sendFluctuationEmail(user.email, userSelectedVegetablesMatch, dateStr);
+                                    console.log(`📧 Email sent to ${user.email}`);
+                                } catch (error) {
+                                    console.error(`❌ Failed to send email to ${user.email}: ${error.message}`);
+                                }
+                            }
+                        }
+                    }
+
                 }
             } catch (error) {
                 console.log(`❌ Couldn't add the scraped data of selected date!: ${error.message}\n`);
